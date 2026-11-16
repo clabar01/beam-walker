@@ -1,0 +1,6 @@
+mujoco>=3.2
+numpy
+mediapy
+imageio
+imageio-ffmpeg
+legoeducation==1.2.0   # real-robot scripts (BLE)
