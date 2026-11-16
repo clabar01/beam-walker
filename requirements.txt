@@ -1,4 +1,4 @@
-mujoco>=3.2
+mujoco==3.11.0   # match the Tufts HPC env (~/mujoco-env)
 numpy
 mediapy
 imageio

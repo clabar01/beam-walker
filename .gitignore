@@ -34,3 +34,7 @@ MUJOCO_LOG.TXT
 # committed. scripts/sim_check.py warns if a video goes over 50 MB; list big
 # ones here by name so they stay out of git, e.g.:
 # videos/long_training_rollout.mp4
+
+# Training
+.venv-mjlab/
+train_out/

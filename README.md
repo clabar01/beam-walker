@@ -15,6 +15,9 @@ it on the real robot.
 | `scripts/measure_motor.py` | **Moves the motors.** Measures each output's RPM at 50%/100% (legs off the ground), logs to `data/motor_rpm.csv` |
 | `scripts/real_walk_test.py` | **Moves the robot.** Walks at 25/50/100% for exactly 5 s and logs both legs' angles. Optional homing to straight forward (sim qpos 0) |
 | `scripts/lego_common.py` | Double Motor connection (card 0999, ORANGE) and the per-side forward directions |
+| `train/walker_task.py` | mjlab task `BeamWalker-DriveStraight`: observations, rewards, terminations, domain randomization |
+| `train/train_walker.py` | Trains with PPO, then writes the checkpoint, TorchScript/ONNX policy, reward plot and rollout videos |
+| `requirements-mjlab.txt` | Pinned training environment (Python 3.13), same versions as the cluster |
 | `data/` | Measurements from the real robot |
 | `videos/` | Rendered rollouts |
 
@@ -53,6 +56,33 @@ Both scripts connect, then wait for Enter before anything moves (`--yes` skips t
 `real_walk_test.py` logs both legs' angles to `data/walk_<speed>pct_<time>.csv`. At the end it prints
 the average leg RPM under load against the commanded RPM. `--home` moves the legs
 (slowly) **before** the Enter prompt.
+
+## Training (mjlab, Tufts HPC)
+
+The task in `train/walker_task.py` only gives the policy what the real robot can sense: leg angles
+(sin/cos), leg speeds, its last command, and the Double Motor's IMU (gyro z and yaw since start, read with
+`dm.imu_device` in legoeducation). Actions are the two motor speeds as a fraction of 17.42 rad/s. Each
+episode randomizes foot friction, motor speed gain and torque limit separately for each side, plus chassis
+mass and the starting leg angles, so the policy has left/right differences to correct.
+
+Run on a GPU node from the repo root (`runIt.py` copies the outputs back to `mujoco-hpc/runs/<name>/`):
+
+```bash
+python3 "$HOME/Documents/ME193-Robotics/Public stuff/mujoco-hpc/runIt.py" --gpu --time 00:30:00 --mem 16G \
+    --cpus 4 train/train_walker.py --with models --with train
+```
+
+Options go after the script name: `--num-envs 2048 --iterations 300` (defaults), `--no-video`.
+Outputs: `walker_final.pt`, `walker_policy.pt` (TorchScript), `walker_policy.onnx`, `policy_io.json` (what
+goes into the policy, in which order), `reward_curves.png`, `rollout_policy.mp4`, `rollout_baseline.mp4`, and
+`rollout_summary.txt`. Both videos use the same deliberately lopsided robot (left foot friction 0.6 vs 1.0,
+right motor 10% slow).
+
+Quick local test before using the GPU (CPU, Python 3.13 venv from `requirements-mjlab.txt`):
+
+```bash
+.venv-mjlab/bin/python train/train_walker.py --num-envs 8 --iterations 3 --video-seconds 2
+```
 
 ## TODO
 
