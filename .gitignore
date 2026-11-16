@@ -1,0 +1,36 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# MuJoCo
+MUJOCO_LOG.TXT
+
+# --- Videos ---
+# .gitignore can't filter by file size. Short sim videos (a few MB) are
+# committed. scripts/sim_check.py warns if a video goes over 50 MB; list big
+# ones here by name so they stay out of git, e.g.:
+# videos/long_training_rollout.mp4
