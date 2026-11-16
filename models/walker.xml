@@ -1,0 +1,141 @@
+<!--
+  beam-walker: LEGO Education Double Motor (45651) with a Technic beam on each
+  output shaft instead of wheels.
+
+  Frame: origin at the center of the chassis bottom face. +X forward, +Y left,
+  +Z up. Units: m, kg, s, rad. Axles run along Y.
+
+  ===================== PLACEHOLDERS (measure and replace) =====================
+  MASS
+    chassis box geom      mass = 0.120 kg   (search: PH_MASS_CHASSIS)
+    hub cylinders (x2)    mass = 0.005 kg   (search: PH_MASS_HUB)
+    leg beam (x2)         mass = 0.007 kg   (search: PH_MASS_BEAM)
+    leg foot (x2)         mass = 0.003 kg   (search: PH_MASS_FOOT)
+    total                      = 0.150 kg   (legs about 0.010 kg each)
+  MOTOR
+    max speed   150 RPM = 15.7 rad/s -> ctrlrange="-15.7 15.7"   (PH_SPEED)
+    stall/limit torque  +/-0.3 N*m   -> forcerange="-0.3 0.3"    (PH_TORQUE)
+    velocity gain       kv = 0.05 N*m*s/rad                      (PH_KV)
+    rotor armature      0.0001 kg*m^2 (reflected gearbox inertia) (PH_ARMATURE)
+    joint damping       0.001 N*m*s/rad                          (PH_DAMPING)
+  CONTACT
+    friction (sliding, torsional, rolling) = 0.8 0.005 0.0001     (PH_FRICTION)
+  ==============================================================================
+
+  Sign convention: positive hinge velocity rotates the leg tip from +X toward
+  -Z (down, then back). That is the "rolling forward" direction, so equal
+  positive commands on both motors should push the robot toward +X.
+-->
+<mujoco model="beam_walker">
+  <compiler angle="radian" autolimits="true"/>
+
+  <!-- implicitfast treats the velocity actuators implicitly, which keeps the
+       very light legs stable at dt = 2 ms. -->
+  <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81"/>
+
+  <visual>
+    <global offwidth="1280" offheight="720"/>
+    <quality shadowsize="4096"/>
+    <headlight ambient="0.2 0.2 0.2" diffuse="0.3 0.3 0.3" specular="0.1 0.1 0.1"/>
+  </visual>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512"
+             rgb1="0.55 0.58 0.62" rgb2="0.42 0.45 0.50" mark="edge" markrgb="0.5 0.5 0.5"/>
+    <material name="floor_mat" texture="grid" texrepeat="20 20" texuniform="true" reflectance="0.05"/>
+    <material name="motor_white" rgba="0.95 0.95 0.93 1"/>
+    <material name="hub_teal" rgba="0.10 0.55 0.60 1"/>
+    <material name="beam_left" rgba="0.85 0.20 0.15 1"/>
+    <material name="beam_right" rgba="0.15 0.35 0.85 1"/>
+    <material name="foot_dark" rgba="0.15 0.15 0.15 1"/>
+  </asset>
+
+  <default>
+    <!-- PH_FRICTION. MuJoCo takes the max of the two geoms' friction, so
+         setting it on everything gives about 0.8 between feet and floor. -->
+    <geom friction="0.8 0.005 0.0001" condim="3"/>
+    <!-- PH_ARMATURE, PH_DAMPING -->
+    <joint armature="0.0001" damping="0.001"/>
+  </default>
+
+  <worldbody>
+    <light name="sun" directional="true" pos="0 0 3" dir="-0.3 0.3 -1"
+           diffuse="0.55 0.55 0.55" specular="0.1 0.1 0.1" castshadow="true"/>
+    <light name="fill" directional="true" pos="0 0 3" dir="0.4 -0.2 -1"
+           diffuse="0.25 0.25 0.25" castshadow="false"/>
+
+    <geom name="floor" type="plane" size="0 0 0.05" material="floor_mat"/>
+
+    <!-- Start 1 mm above the floor. -->
+    <body name="chassis" pos="0 0 0.001">
+      <freejoint name="root"/>
+
+      <!-- Follows the robot; orientation stays fixed in world (rear-left 3/4 view). -->
+      <camera name="track" mode="trackcom" pos="-0.20 -0.30 0.20"
+              xyaxes="0.832 -0.555 0 0.269 0.404 0.875" fovy="45"/>
+
+      <!-- Body box: full 0.0796 x 0.0479 x 0.0305 -->
+      <geom name="chassis_box" type="box" size="0.0398 0.02395 0.01525"
+            pos="0 0 0.01524" material="motor_white" mass="0.120"/>  <!-- PH_MASS_CHASSIS -->
+
+      <!-- Output hubs, axis along Y, y = 0.02393..0.03028 (and mirror) -->
+      <geom name="hub_left" type="cylinder" size="0.0116"
+            fromto="0.0252 0.02393 0.01524  0.0252 0.03028 0.01524"
+            material="hub_teal" mass="0.005"/>  <!-- PH_MASS_HUB -->
+      <geom name="hub_right" type="cylinder" size="0.0116"
+            fromto="0.0252 -0.02393 0.01524  0.0252 -0.03028 0.01524"
+            material="hub_teal" mass="0.005"/>  <!-- PH_MASS_HUB -->
+
+      <!-- Built-in motion sensor (IMU) -->
+      <site name="imu" pos="0 0 0.01524" size="0.004" rgba="1 0.8 0 1"/>
+
+      <!-- LEFT LEG: hinge at the outer face of the left hub -->
+      <body name="leg_left" pos="0.0252 0.0303 0.01524">
+        <joint name="hinge_left" type="hinge" axis="0 1 0"/>
+        <!-- beam: full 0.0635 x 0.0078 x 0.0096 -->
+        <geom name="beam_left" type="box" size="0.03175 0.0039 0.0048"
+              pos="0.01575 0.0039 0" material="beam_left" mass="0.007"/>  <!-- PH_MASS_BEAM -->
+        <!-- foot: full 0.01524 x 0.01524 x 0.0096 -->
+        <geom name="foot_left" type="box" size="0.00762 0.00762 0.0048"
+              pos="0.03988 0.00788 -0.0096" material="foot_dark" mass="0.003"/>  <!-- PH_MASS_FOOT -->
+      </body>
+
+      <!-- RIGHT LEG: mirror on -Y. Same +Y axis, so the same command sign
+           drives both legs forward. -->
+      <body name="leg_right" pos="0.0252 -0.0303 0.01524">
+        <joint name="hinge_right" type="hinge" axis="0 1 0"/>
+        <geom name="beam_right" type="box" size="0.03175 0.0039 0.0048"
+              pos="0.01575 -0.0039 0" material="beam_right" mass="0.007"/>  <!-- PH_MASS_BEAM -->
+        <geom name="foot_right" type="box" size="0.00762 0.00762 0.0048"
+              pos="0.03988 -0.00788 -0.0096" material="foot_dark" mass="0.003"/>  <!-- PH_MASS_FOOT -->
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- No collisions between the chassis and its own legs (or between legs). -->
+  <contact>
+    <exclude body1="chassis" body2="leg_left"/>
+    <exclude body1="chassis" body2="leg_right"/>
+    <exclude body1="leg_left" body2="leg_right"/>
+  </contact>
+
+  <actuator>
+    <!-- PH_SPEED (ctrlrange), PH_KV (kv), PH_TORQUE (forcerange) -->
+    <velocity name="motor_left" joint="hinge_left" kv="0.05"
+              ctrlrange="-15.7 15.7" forcerange="-0.3 0.3"/>
+    <velocity name="motor_right" joint="hinge_right" kv="0.05"
+              ctrlrange="-15.7 15.7" forcerange="-0.3 0.3"/>
+  </actuator>
+
+  <sensor>
+    <!-- objtype="xbody" = the body frame (origin at bottom-face center).
+         objtype="body" would give the inertial (COM / principal-axis) frame. -->
+    <framepos name="chassis_pos" objtype="xbody" objname="chassis"/>
+    <framequat name="chassis_quat" objtype="xbody" objname="chassis"/>
+    <gyro name="chassis_gyro" site="imu"/>
+    <jointpos name="hinge_left_pos" joint="hinge_left"/>
+    <jointpos name="hinge_right_pos" joint="hinge_right"/>
+    <jointvel name="hinge_left_vel" joint="hinge_left"/>
+    <jointvel name="hinge_right_vel" joint="hinge_right"/>
+  </sensor>
+</mujoco>
