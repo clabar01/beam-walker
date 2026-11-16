@@ -15,7 +15,6 @@ import argparse
 import csv
 import math
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -27,64 +26,11 @@ import lego_common as lc  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 CSV_PATH = ROOT / "data" / "motor_rpm.csv"
-FIELDS = ["t_s", "phase", "cmd_pct", "side", "position_deg", "abs_position_deg",
-          "speed_pct", "power"]
-
-
-class Logger(threading.Thread):
-    """Polls dm.motor[] and records each NEW notification with a host timestamp.
-
-    The library replaces dm.motor[i] with a fresh object on every notification,
-    so an identity change means a new reading arrived.
-    """
-
-    def __init__(self, dm, t0, poll_s=0.002):
-        super().__init__(daemon=True)
-        self.dm, self.t0, self.poll_s = dm, t0, poll_s
-        self.rows = []
-        self.phase, self.cmd = "idle", 0
-        self._stop = threading.Event()
-
-    def run(self):
-        last = [None, None]
-        while not self._stop.is_set():
-            now = time.monotonic() - self.t0
-            for i, side in ((le.MOTOR_LEFT, "left"), (le.MOTOR_RIGHT, "right")):
-                m = self.dm.motor[i]
-                if m is not last[i] and not (isinstance(m.position, float) and math.isnan(m.position)):
-                    last[i] = m
-                    self.rows.append({
-                        "t_s": round(now, 4), "phase": self.phase, "cmd_pct": self.cmd,
-                        "side": side, "position_deg": m.position,
-                        "abs_position_deg": m.absolutePosition,
-                        "speed_pct": m.speed, "power": m.power,
-                    })
-            time.sleep(self.poll_s)
-
-    def stop(self):
-        self._stop.set()
-        self.join(timeout=1)
-
-
 def run_both(dm, pct):
     """Start both outputs together in the forward direction at pct %."""
     with dm.batch():
         dm.motor_run(direction=lc.LEFT_FORWARD, motor=le.MOTOR_LEFT, speed=pct)
         dm.motor_run(direction=lc.RIGHT_FORWARD, motor=le.MOTOR_RIGHT, speed=pct)
-
-
-def fit_rpm(rows, phase, side, settle_s):
-    """RPM from a straight-line fit of position vs time, skipping the spin-up."""
-    pts = [(r["t_s"], r["position_deg"]) for r in rows if r["phase"] == phase and r["side"] == side]
-    if len(pts) < 5:
-        return float("nan"), 0
-    t0 = pts[0][0]
-    pts = [p for p in pts if p[0] - t0 >= settle_s]
-    if len(pts) < 5:
-        return float("nan"), 0
-    t, pos = np.array(pts).T
-    deg_per_s = np.polyfit(t, pos, 1)[0]
-    return deg_per_s / 6.0, len(pts)          # 360 deg/rev, 60 s/min
 
 
 def mean_power(rows, phase, side, settle_s):
@@ -117,7 +63,7 @@ def main():
         time.sleep(0.2)
 
         t0 = time.monotonic()
-        log = Logger(dm, t0)
+        log = lc.Logger(dm, t0)
         log.start()
         time.sleep(0.3)                                      # baseline at rest
 
@@ -143,7 +89,7 @@ def main():
 
     CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(CSV_PATH, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDS)
+        w = csv.DictWriter(f, fieldnames=lc.FIELDS)
         w.writeheader()
         w.writerows(log.rows)
     n_left = sum(r["side"] == "left" for r in log.rows)
@@ -155,8 +101,8 @@ def main():
           f"{'mean rad/s':>10} | {'L power':>7} | {'R power':>7} | {'R/L power':>9}")
     print("-" * 90)
     for name, pct in phases:
-        rl, nl = fit_rpm(log.rows, name, "left", args.settle)
-        rr, nr = fit_rpm(log.rows, name, "right", args.settle)
+        rl, nl = lc.fit_rpm(log.rows, name, "left", args.settle)
+        rr, nr = lc.fit_rpm(log.rows, name, "right", args.settle)
         # Signs depend on how each output counts; the outputs are mirrored, so compare magnitudes.
         al, ar = abs(rl), abs(rr)
         mismatch = (ar - al) / al * 100 if al > 0 else float("nan")

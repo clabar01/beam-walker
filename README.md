@@ -13,7 +13,7 @@ it on the real robot.
 | `models/walker.xml` | MuJoCo MJCF model: chassis (free joint), two leg hinges, velocity actuators, sensors |
 | `scripts/sim_check.py` | Headless sanity test: drives both motors at the same speed, prints x/y/yaw, writes `videos/sim_check.mp4` |
 | `scripts/measure_motor.py` | **Moves the motors.** Measures each output's RPM at 50%/100% (legs off the ground), logs to `data/motor_rpm.csv` |
-| `scripts/real_walk_test.py` | **Moves the robot.** Walks at 25/50/100% for exactly 5 s so you can tape-measure the distance and compare with the sim |
+| `scripts/real_walk_test.py` | **Moves the robot.** Walks at 25/50/100% for exactly 5 s and logs both legs' angles. Optional homing to straight forward (sim qpos 0) |
 | `scripts/lego_common.py` | Double Motor connection (card 0999, ORANGE) and the per-side forward directions |
 | `data/` | Measurements from the real robot |
 | `videos/` | Rendered rollouts |
@@ -46,8 +46,13 @@ Both scripts connect, then wait for Enter before anything moves (`--yes` skips t
 
 ```bash
 .venv/bin/python scripts/measure_motor.py        # lift the robot first
-.venv/bin/python scripts/real_walk_test.py 50    # on the floor; add --reverse if it walks backward
+.venv/bin/python scripts/real_walk_test.py --calibrate-home   # once: point legs forward by hand
+.venv/bin/python scripts/real_walk_test.py 50 --home  # home legs, Enter, walk 5 s; --reverse if it walks backward
 ```
+
+`real_walk_test.py` logs both legs' angles to `data/walk_<speed>pct_<time>.csv`. At the end it prints
+the average leg RPM under load against the commanded RPM. `--home` moves the legs
+(slowly) **before** the Enter prompt.
 
 ## TODO
 
