@@ -87,6 +87,17 @@ def fit_rpm(rows, phase, side, settle_s):
     return deg_per_s / 6.0, len(pts)          # 360 deg/rev, 60 s/min
 
 
+def mean_power(rows, phase, side, settle_s):
+    """Mean |power| after spin-up. The hub regulates speed, so a weaker or
+    higher-friction side shows up here (more effort for the same RPM)."""
+    pts = [(r["t_s"], r["power"]) for r in rows if r["phase"] == phase and r["side"] == side]
+    if not pts:
+        return float("nan")
+    t0 = pts[0][0]
+    vals = [abs(p) for t, p in pts if t - t0 >= settle_s]
+    return float(np.mean(vals)) if vals else float("nan")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--duration", type=float, default=5.0, help="seconds per speed (default 5)")
@@ -141,8 +152,8 @@ def main():
           f"{CSV_PATH.relative_to(ROOT)}")
 
     print(f"\n{'speed':>6} | {'left RPM':>9} | {'right RPM':>9} | {'R/L mismatch':>12} | "
-          f"{'mean rad/s':>10}")
-    print("-" * 60)
+          f"{'mean rad/s':>10} | {'L power':>7} | {'R power':>7} | {'R/L power':>9}")
+    print("-" * 90)
     for name, pct in phases:
         rl, nl = fit_rpm(log.rows, name, "left", args.settle)
         rr, nr = fit_rpm(log.rows, name, "right", args.settle)
@@ -150,8 +161,13 @@ def main():
         al, ar = abs(rl), abs(rr)
         mismatch = (ar - al) / al * 100 if al > 0 else float("nan")
         mean_rads = (al + ar) / 2 * 2 * math.pi / 60
-        print(f"{pct:>5}% | {rl:>+9.1f} | {rr:>+9.1f} | {mismatch:>+11.1f}% | {mean_rads:>10.2f}")
-    print("\nRPM signs show which way each output's encoder counts; magnitudes are what matter.")
+        pl, pr = mean_power(log.rows, name, "left", args.settle), mean_power(log.rows, name, "right", args.settle)
+        pmis = (pr - pl) / pl * 100 if pl > 0 else float("nan")
+        print(f"{pct:>5}% | {rl:>+9.1f} | {rr:>+9.1f} | {mismatch:>+11.1f}% | {mean_rads:>10.2f} | "
+              f"{pl:>7.0f} | {pr:>7.0f} | {pmis:>+8.1f}%")
+    print("\nThe hub regulates each output's speed, so RPM usually matches closely;")
+    print("a real left/right difference shows up as a power (effort) mismatch instead.")
+    print("RPM signs show which way each output's encoder counts; magnitudes are what matter.")
     print("Use the 100% mean rad/s for ctrlrange (PH_SPEED) in models/walker.xml.")
 
 
