@@ -27,7 +27,8 @@
     joint damping       0.001 N*m*s/rad                          (PH_DAMPING)
   CONTACT
     foot friction  (sliding, torsional, rolling) = see class "foot"  (PH_FOOT_FRICTION)
-                   tuned so the 50% sim distance matches the real walk; see docs/sim_vs_real.md
+                   0.8 placeholder. NOT tuned: the first real walks were on a soft comforter
+                   (invalid). Re-tune after hard-floor runs; see docs/sim_vs_real.md
     other geoms    0.8 0.005 0.0001 (default class)  (PH_FRICTION)
     floor          near zero, so each contact uses the OTHER geom's friction
                    (MuJoCo takes the max of the pair)
@@ -69,7 +70,7 @@
     <joint armature="0.0001" damping="0.001"/>
     <!-- PH_FOOT_FRICTION: the only friction value being tuned against the real robot. -->
     <default class="foot">
-      <geom friction="0.2 0.005 0.0001"/>  <!-- tuned 2026-11-15, was 0.8 -->
+      <geom friction="0.8 0.005 0.0001"/>  <!-- reverted to 0.8: the 0.2 fit used invalid comforter data -->
     </default>
   </default>
 
