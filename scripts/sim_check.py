@@ -44,9 +44,14 @@ def main():
     ap.add_argument("--width", type=int, default=640)
     ap.add_argument("--height", type=int, default=480)
     ap.add_argument("--no-video", action="store_true")
+    ap.add_argument("--foot-friction", type=float, default=None,
+                    help="override the feet's sliding friction (for tuning sweeps)")
     args = ap.parse_args()
 
     model = mujoco.MjModel.from_xml_path(str(MODEL_PATH))
+    if args.foot_friction is not None:
+        for name in ("foot_left", "foot_right"):
+            model.geom(name).friction[0] = args.foot_friction
     data = mujoco.MjData(model)
     mujoco.mj_resetData(model, data)
     mujoco.mj_forward(model, data)
@@ -55,6 +60,8 @@ def main():
     act_r = model.actuator("motor_right").id
     max_speed = model.actuator_ctrlrange[act_l, 1]
     cmd = args.speed_frac * max_speed
+    mismatch = float(model.numeric("speed_mismatch_right").data[0])
+    cmd_r = cmd * (1.0 + mismatch)
 
     start_pos = data.sensor("chassis_pos").data.copy()
     start_yaw = quat_to_yaw_deg(data.sensor("chassis_quat").data)
@@ -70,7 +77,7 @@ def main():
     max_tilt_deg = 0.0
     for i in range(n_steps):
         data.ctrl[act_l] = cmd
-        data.ctrl[act_r] = cmd
+        data.ctrl[act_r] = cmd_r
         mujoco.mj_step(model, data)
 
         up = chassis_up_z(data.sensor("chassis_quat").data)
@@ -94,6 +101,8 @@ def main():
 
     print(f"model:           {MODEL_PATH.relative_to(ROOT)}")
     print(f"command:         {cmd:.2f} rad/s on both motors ({args.speed_frac:.0%} of {max_speed:.1f})")
+    print(f"R/L mismatch:    {mismatch:+.1%} (right cmd {cmd_r:.2f})")
+    print(f"foot friction:   {model.geom('foot_left').friction[0]:.3f}")
     print(f"duration:        {args.duration:.1f} s")
     print(f"forward (x):     {dx * 100:+.2f} cm")
     print(f"sideways (y):    {dy * 100:+.2f} cm")
