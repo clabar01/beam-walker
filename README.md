@@ -14,7 +14,7 @@ it on the real robot.
 | `scripts/sim_check.py` | Headless sanity test: drives both motors at the same speed, prints x/y/yaw, writes `videos/sim_check.mp4` |
 | `scripts/measure_motor.py` | **Moves the motors.** Measures each output's RPM at 50%/100% (legs off the ground), logs to `data/motor_rpm.csv` |
 | `scripts/real_walk_test.py` | **Moves the robot.** Walks at 25/50/100% for exactly 5 s so you can tape-measure the distance and compare with the sim |
-| `scripts/lego_common.py` | Double Motor connection (card 0999, RED) and the per-side forward directions |
+| `scripts/lego_common.py` | Double Motor connection (card 0999, ORANGE) and the per-side forward directions |
 | `data/` | Measurements from the real robot |
 | `videos/` | Rendered rollouts |
 

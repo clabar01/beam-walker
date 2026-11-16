@@ -8,7 +8,7 @@ import time
 import legoeducation as le
 
 CARD_SERIAL = "0999"
-CARD_COLOR = le.LEGO_COLOR_RED
+CARD_COLOR = le.LEGO_COLOR_ORANGE   # public constant (= 9); connect() matches against this
 
 # Which way each output turns to move the robot FORWARD. The two outputs face
 # opposite sides, so they spin in opposite directions to roll the same way.
@@ -30,7 +30,7 @@ def opposite(direction):
 def connect_double_motor(attempts=5):
     """Connect to the Double Motor, retrying the usual "not ready" / asleep cases."""
     dm = le.DoubleMotor()
-    print(f"Connecting to Double Motor (card {CARD_SERIAL}, RED)...")
+    print(f"Connecting to Double Motor (card {CARD_SERIAL}, ORANGE)...")
     for attempt in range(attempts):
         last = attempt == attempts - 1
         try:
