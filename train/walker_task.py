@@ -67,12 +67,19 @@ if MODEL_XML is None:
 JOINTS = ("hinge_left", "hinge_right")          # order of actions and leg observations: LEFT, RIGHT
 ACTUATORS = ("motor_left", "motor_right")       # same order
 FEET = ("foot_left", "foot_right")
-MAX_SPEED = 17.42      # rad/s, measured no-load speed at 100% (= walker.xml ctrlrange). Action 1.0 = this.
+MAX_SPEED = 17.42      # rad/s, measured no-load speed at 100% (= walker.xml ctrlrange)
+MAX_CMD_FRAC = 0.6     # policy commands are capped at 60% of MAX_SPEED: action 1.0 = 60% = 10.45 rad/s.
+                       # The sim matches the real robot at 25-50% but goes 2x too far at 100%
+                       # (docs/sim_vs_real.md), so keep the policy in the range that was checked.
 V_CAP = 0.08           # m/s; forward speed above this earns nothing more. Sim speeds (10 s runs):
                        # 25% 0.054, 50% 0.064, 75% 0.095, 100% 0.116 m/s, so the cap sits near 60-65%
                        # throttle and leaves headroom to steer by speeding one side up.
 SIM_DT = 0.002         # s, same as walker.xml
-DECIMATION = 10        # policy runs every 10 physics steps = 50 Hz (the BLE notification period is 20 ms)
+DECIMATION = 31        # policy runs every 31 physics steps = 62 ms = 16.1 Hz. Measured on the real robot
+                       # (scripts/imu_rate_check.py, 2026-11-16): a confirmed motor command over BLE takes a
+                       # median 60 ms round trip, so a blocking policy loop runs at 16 Hz.
+ACTION_DELAY_STEPS = DECIMATION  # command delay sampled from 0..1 control step (in physics steps), redrawn
+                                 # every control step: round trips vary 60-118 ms
 EPISODE_S = 10.0
 TILT_LIMIT_DEG = 70.0  # flipped; normal walking reaches about 35-41 deg in sim_check.py
 START_Z = 0.010        # m; a leg turned +10 deg reaches ~7 mm below the chassis bottom, so start higher and drop
@@ -80,7 +87,7 @@ START_Z = 0.010        # m; a leg turned +10 deg reaches ~7 mm below the chassis
 # Domain randomization, sampled every episode, each side independently.
 FOOT_FRICTION = (0.5, 1.1)
 SPEED_GAIN = (0.85, 1.15)     # motor speed = gain * command
-TORQUE_SCALE = (0.80, 1.20)   # x the 0.3 N*m force limit in walker.xml
+TORQUE_SCALE = (0.80, 1.20)   # x the force limit in walker.xml (0.032 N*m, fitted 2026-11-16)
 MASS_SCALE = (0.85, 1.15)     # chassis mass (and inertia, consistently)
 LEG_START_DEG = 10.0
 
@@ -113,8 +120,19 @@ def _robot_cfg() -> EntityCfg:
     init_state=EntityCfg.InitialStateCfg(
       pos=(0.0, 0.0, START_Z), joint_pos={".*": 0.0}, joint_vel={".*": 0.0}
     ),
-    # Use the velocity actuators already in walker.xml (kv 0.05, force limit 0.3 N*m, ctrl +-17.42 rad/s).
-    articulation=EntityArticulationInfoCfg(actuators=(XmlActuatorCfg(target_names_expr=JOINTS),)),
+    # Use the velocity actuators already in walker.xml (kv 0.05, force limit, ctrl +-17.42 rad/s).
+    # Each command reaches the motor 0 to 1 control steps late (uniform, redrawn every control step).
+    articulation=EntityArticulationInfoCfg(
+      actuators=(
+        XmlActuatorCfg(
+          target_names_expr=JOINTS,
+          delay_min_lag=0,
+          delay_max_lag=ACTION_DELAY_STEPS,
+          delay_update_period=DECIMATION,
+          delay_per_env_phase=False,   # keep the redraw aligned with the policy's control steps
+        ),
+      ),
+    ),
   )
 
 
@@ -281,7 +299,8 @@ def walker_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   actions: dict[str, ActionTermCfg] = {
     "legs": JointVelocityActionCfg(
-      entity_name="robot", actuator_names=JOINTS, scale=MAX_SPEED, use_default_offset=True, preserve_order=True
+      entity_name="robot", actuator_names=JOINTS, scale=MAX_CMD_FRAC * MAX_SPEED, use_default_offset=True,
+      preserve_order=True,
     ),
   }
 
@@ -352,7 +371,7 @@ def walker_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     experiment_name="beam_walker",
     logger="tensorboard",    # the default, wandb, needs an account
     upload_model=False,
-    clip_actions=1.0,        # actions are fractions of MAX_SPEED
+    clip_actions=1.0,        # action 1.0 = MAX_CMD_FRAC (60%) of MAX_SPEED
     save_interval=50,
     num_steps_per_env=24,
     max_iterations=300,

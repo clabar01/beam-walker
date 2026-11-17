@@ -64,11 +64,13 @@ def parse_args():
   ap.add_argument("--checkpoint", type=Path, default=None, help="use this checkpoint instead of training")
   ap.add_argument("--video-seconds", type=float, default=10.0)
   ap.add_argument("--no-video", action="store_true")
+  ap.add_argument("--video-fps", type=float, default=30.0, help="video frame rate, sampled from the physics")
   ap.add_argument("--baseline-frac", type=float, default=0.5, help="baseline: both motors at this fraction of max speed")
   # The robot used for BOTH rollout videos: fixed, lopsided values inside the training ranges, so the baseline
-  # curves and the policy has something to correct.
-  ap.add_argument("--eval-friction", type=float, nargs=2, default=(0.6, 1.0), metavar=("LEFT", "RIGHT"))
-  ap.add_argument("--eval-speed-gain", type=float, nargs=2, default=(1.0, 0.9), metavar=("LEFT", "RIGHT"))
+  # curves and the policy has something to correct. Chosen so the baseline drifts LEFT, like every real
+  # hard-floor run (docs/sim_vs_real.md). The mirror image (left foot 0.6, right motor slow) drifts right.
+  ap.add_argument("--eval-friction", type=float, nargs=2, default=(1.0, 0.6), metavar=("LEFT", "RIGHT"))
+  ap.add_argument("--eval-speed-gain", type=float, nargs=2, default=(0.9, 1.0), metavar=("LEFT", "RIGHT"))
   ap.add_argument("--eval-torque-scale", type=float, nargs=2, default=(1.0, 1.0), metavar=("LEFT", "RIGHT"))
   return ap.parse_args()
 
@@ -194,9 +196,42 @@ def export_policy(ckpt: Path, out: Path, device: str):
       "gyro_z": "yaw rate in rad/s, chassis frame, + = turning left (counterclockwise seen from above)",
       "heading_error": "yaw in rad since the start (dm.imu_reset_yaw_axis() at the start), + = turned left",
     },
-    "action": "[L, R] in [-1, 1]; motor speed command = action * max_speed_rad_s (= action * 100 percent)",
+    "action": f"[L, R] in [-1, 1]; motor speed command = action * max_command_frac * max_speed_rad_s "
+              f"(= action * {100 * wt.MAX_CMD_FRAC:.0f} percent). Never command more than {100 * wt.MAX_CMD_FRAC:.0f}%: "
+              "the sim was only checked against the real robot up to 50% and goes 2x too far at 100%",
     "max_speed_rad_s": wt.MAX_SPEED,
+    "max_command_frac": wt.MAX_CMD_FRAC,
     "normalization": "inside the exported model (feed raw observations as above)",
+    "action_delay_in_training": "0 to 1 control steps, uniform, redrawn every step",
+    # Measured on the real robot 2026-11-16 (scripts/imu_rate_check.py, data/imu_check_20261116-184818.csv).
+    # How to turn legoeducation readings into the observations above.
+    "real_robot": {
+      "control_loop": "one BLOCKING batch of motor_run (left + right) per step, never a new command before the "
+                      "last is confirmed; measured median round trip 60 ms (95th pct 90, max 118) -> 16 Hz",
+      "measured_rate_hz": 16.0,
+      "imu_update_rate_hz": 32,
+      "heading_error": {
+        "source": "dm.imu_device.yaw",
+        "raw_unit": "0.1 deg",
+        "convert": "rad = wrap_to_pi(radians(raw / 10)); call dm.imu_reset_yaw_axis(0) before starting",
+        "sign": "+ = turned left, same as the sim",
+      },
+      "gyro_z": {
+        "source": "dm.imu_device.gyroscopeZ (z is the yaw axis; x and y barely moved during a 90 deg turn)",
+        "raw_unit": "deg/s (measured 1.08-1.14 raw units per deg/s; treat as deg/s, about 10% uncertain)",
+        "convert": "rad/s = radians(raw)",
+        "sign": "+ = turning left, same as the sim",
+      },
+      "leg_angle": "radians(forward_sign(dir) * dm.motor[i].position) after lego_common.zero_relative_at_home(); "
+                   "0 = straight forward, + = rolled forward (left counts down when walking forward; verified in "
+                   "the 2026-11-16 walk logs)",
+      "leg_vel": "forward_sign(dir) * dm.motor[i].speed / 100 * max_speed_rad_s; speed is percent of max, same sign "
+                 "as position (walk logs: -24/+24 at 25%, -49/+49 at 50%, -99/+99 at 100% for L/R)",
+      "runner": "scripts/run_policy.py implements all of the above",
+      "action_to_motor": f"a = clip(a, -1, 1); percent = round({100 * wt.MAX_CMD_FRAC:.0f} * abs(a)) "
+                         f"(at most {100 * wt.MAX_CMD_FRAC:.0f}%); direction = LEFT_FORWARD / RIGHT_FORWARD if a >= 0 "
+                         "else the opposite (lego_common)",
+    },
   }
   (out / "policy_io.json").write_text(json.dumps(io, indent=2) + "\n")
   env.close()
@@ -221,41 +256,62 @@ def make_eval_env(args, device: str) -> ManagerBasedRlEnv:
   return ManagerBasedRlEnv(cfg=env_cfg, device=device)
 
 
-def rollout(env: ManagerBasedRlEnv, act_fn, seconds: float, video: Path | None):
-  """Run one episode from reset; return per-second rows and write an mp4 (track camera, like sim_check.py)."""
+def rollout(env: ManagerBasedRlEnv, act_fn, seconds: float, video: Path | None, video_fps: float = 30.0):
+  """Run one episode from reset; return per-second rows and write an mp4 (track camera, like sim_check.py).
+
+  The policy acts at 16 Hz, but the video samples the physics at video_fps: env.sim.step is wrapped (for this
+  rollout only) to save env 0's qpos every 1/video_fps s of sim time, including in between control steps.
+  """
   obs, _ = env.reset()
   robot = env.scene["robot"]
   origin = env.scene.env_origins[0, :2].cpu().numpy()
-  steps = int(round(seconds / (wt.SIM_DT * wt.DECIMATION)))
-  fps = int(round(1.0 / (wt.SIM_DT * wt.DECIMATION)))
-  renderer = data = None
-  frames = []
+  ctrl_dt = wt.SIM_DT * wt.DECIMATION          # 62 ms per policy step
+  steps = int(round(seconds / ctrl_dt))
+
+  qpos_frames = []
+  orig_step = env.sim.step
   if video is not None:
+    clock = {"n": 0, "next_t": 0.0}
+
+    def step_and_capture():
+      orig_step()
+      clock["n"] += 1
+      if clock["n"] * wt.SIM_DT + 1e-9 >= clock["next_t"]:
+        qpos_frames.append(env.sim.data.qpos[0].cpu().numpy().copy())
+        clock["next_t"] += 1.0 / video_fps
+
+    env.sim.step = step_and_capture
+
+  rows, flipped = [], False
+  last_action = torch.zeros(1, 2, device=env.device)
+  try:
+    with torch.no_grad():
+      for k in range(steps):
+        action = torch.clamp(act_fn(obs["actor"]), -1.0, 1.0).to(env.device)
+        obs, _, terminated, _, _ = env.step(action)
+        last_action = action
+        if bool(terminated[0]):
+          flipped = True
+        if int((k + 1) * ctrl_dt + 1e-9) > int(k * ctrl_dt + 1e-9) or k == steps - 1:   # each whole second
+          x, y = (robot.data.root_link_pos_w[0, :2].cpu().numpy() - origin).tolist()
+          yaw = math.degrees(wt._yaw(env)[0].item())
+          rows.append({"t": (k + 1) * ctrl_dt, "x_cm": 100 * x, "y_cm": 100 * y, "yaw_deg": yaw,
+                       "cmd_L": last_action[0, 0].item(), "cmd_R": last_action[0, 1].item()})
+  finally:
+    env.sim.step = orig_step                   # the next rollout reuses this env
+
+  if video is not None and qpos_frames:
     model = env.sim.mj_model
     data = mujoco.MjData(model)
     renderer = mujoco.Renderer(model, height=480, width=640)
-  rows, flipped = [], False
-  last_action = torch.zeros(1, 2, device=env.device)
-  with torch.no_grad():
-    for k in range(steps):
-      action = torch.clamp(act_fn(obs["actor"]), -1.0, 1.0).to(env.device)
-      obs, _, terminated, _, _ = env.step(action)
-      last_action = action
-      if bool(terminated[0]):
-        flipped = True
-      if renderer is not None:
-        data.qpos[:] = env.sim.data.qpos[0].cpu().numpy()
-        mujoco.mj_forward(env.sim.mj_model, data)
-        renderer.update_scene(data, camera="robot/track")
-        frames.append(renderer.render())
-      if (k + 1) % fps == 0 or k == steps - 1:
-        x, y = (robot.data.root_link_pos_w[0, :2].cpu().numpy() - origin).tolist()
-        yaw = math.degrees(wt._yaw(env)[0].item())
-        rows.append({"t": (k + 1) / fps, "x_cm": 100 * x, "y_cm": 100 * y, "yaw_deg": yaw,
-                     "cmd_L": last_action[0, 0].item(), "cmd_R": last_action[0, 1].item()})
-  if renderer is not None:
-    imageio.mimwrite(video, frames, fps=fps, quality=8, macro_block_size=1)
+    frames = []
+    for q in qpos_frames:
+      data.qpos[:] = q
+      mujoco.mj_forward(model, data)
+      renderer.update_scene(data, camera="robot/track")
+      frames.append(renderer.render())
     renderer.close()
+    imageio.mimwrite(video, frames, fps=video_fps, quality=8, macro_block_size=1)
   return rows, flipped
 
 
@@ -263,9 +319,12 @@ def run_rollouts(args, out: Path, device: str):
   env = make_eval_env(args, device)
   jit = torch.jit.load(str(out / "walker_policy.pt"), map_location="cpu")
   base = args.baseline_frac
+  if not 0 < base <= wt.MAX_CMD_FRAC:
+    raise SystemExit(f"--baseline-frac must be in (0, {wt.MAX_CMD_FRAC}] (the command cap)")
+  base_action = base / wt.MAX_CMD_FRAC            # actions are in units of the 60% cap
   runs = {
     "policy": lambda o: jit(o.cpu()),
-    "baseline": lambda o: torch.full((o.shape[0], 2), base),
+    "baseline": lambda o: torch.full((o.shape[0], 2), base_action),
   }
   lines = [
     f"Eval robot (same for both): foot friction L/R {args.eval_friction}, speed gain L/R {args.eval_speed_gain}, "
@@ -275,11 +334,11 @@ def run_rollouts(args, out: Path, device: str):
   ]
   for name, fn in runs.items():
     video = None if args.no_video else out / f"rollout_{name}.mp4"
-    rows, flipped = rollout(env, fn, args.video_seconds, video)
+    rows, flipped = rollout(env, fn, args.video_seconds, video, args.video_fps)
     lines.append(f"== {name}{'  (FLIPPED and reset during the run)' if flipped else ''}")
-    lines.append("   t(s)   x(cm)   y(cm)  yaw(deg)  cmd L   cmd R")
+    lines.append("   t(s)   x(cm)   y(cm)  yaw(deg)  cmd L%  cmd R%")
     for r in rows:
-      lines.append(f"  {r['t']:5.1f} {r['x_cm']:7.1f} {r['y_cm']:7.1f} {r['yaw_deg']:8.1f}  {r['cmd_L']:+.2f}   {r['cmd_R']:+.2f}")
+      lines.append(f"  {r['t']:5.1f} {r['x_cm']:7.1f} {r['y_cm']:7.1f} {r['yaw_deg']:8.1f}  {100 * wt.MAX_CMD_FRAC * r['cmd_L']:+5.0f}   {100 * wt.MAX_CMD_FRAC * r['cmd_R']:+5.0f}")
     f = rows[-1]
     lines.append(f"   final: forward {f['x_cm']:.1f} cm, sideways {f['y_cm']:+.1f} cm, heading {f['yaw_deg']:+.1f} deg")
     lines.append("")

@@ -44,3 +44,46 @@ Curves: [training_cpu_check_reward_curves.png](training_cpu_check_reward_curves.
   `exp(-(v - 0.07)^2 / 0.02^2)` on the GPU run.
 - Check the IMU gyro units on the real robot (legoeducation does not document them); yaw is in degrees.
 - Next: GPU run (2048 envs x 300 iterations), command in the README.
+
+---
+
+# 2026-11-16: CPU check at the real control rate (passed)
+
+Setup changes since the run above: policy at **16.1 Hz** (measured real rate) with a random **0–1 step command delay**,
+motor commands **capped at 60%**, fitted `walker.xml` (body friction 0.3, torque limit 0.032 N·m), and a test robot
+that drifts **left** like the real one (right foot friction 0.6, left motor 10% slow). Same reward (capped forward
+velocity, action rate -0.1). 256 envs x 150 iterations, CPU.
+
+## 10 s rollout on the left-drifting test robot
+
+| | Trained policy | Baseline (both motors 50%) |
+|---|---|---|
+| Walks the full 10 s | yes, no stall, no flip | yes |
+| Forward | 138.8 cm | 145.2 cm |
+| Final lateral offset | **+7.2 cm** | +51.4 cm |
+| Final heading error | **-14.8 deg** | +18.9 deg |
+| Heading during the run | -14.8 to +15.4 deg | -4 to +60 deg |
+
+The policy corrects mostly by slowing the left motor (left 23-60%, right 8-60%). In the last 3 s it overcorrects:
+the left motor drops to ~25% and the heading drifts right to -15 deg. Watch for this in the GPU run.
+
+## Reward terms
+
+Weighted, per second of episode:
+
+| Term | Iteration 0 | 75 | 149 |
+|---|---|---|---|
+| Mean return | -0.18 | 8.09 | 8.48 |
+| forward_vel | 0.027 | 0.978 | 0.991 |
+| sideways_vel | -0.009 | -0.073 | -0.060 |
+| heading_error | -0.011 | -0.028 | -0.022 |
+| yaw_rate | -0.005 | -0.052 | -0.049 |
+| action_rate | -0.017 | -0.011 | -0.007 |
+
+Episodes all ran the full 10 s (162 steps); 0% flipped.
+
+## Open point
+
+`forward_vel` is saturated at ~0.99: the policy already walks ~0.14 m/s, above the 0.08 m/s cap (`V_CAP`),
+so speed earns nothing extra and the reward is driven by the steering terms. That was expected after the
+model fit (the real robot does 0.107 m/s at 25%). Not changed yet; consider raising `V_CAP` to ~0.12 m/s.
