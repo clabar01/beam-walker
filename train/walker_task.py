@@ -71,9 +71,11 @@ MAX_SPEED = 17.42      # rad/s, measured no-load speed at 100% (= walker.xml ctr
 MAX_CMD_FRAC = 0.6     # policy commands are capped at 60% of MAX_SPEED: action 1.0 = 60% = 10.45 rad/s.
                        # The sim matches the real robot at 25-50% but goes 2x too far at 100%
                        # (docs/sim_vs_real.md), so keep the policy in the range that was checked.
-V_CAP = 0.08           # m/s; forward speed above this earns nothing more. Sim speeds (10 s runs):
-                       # 25% 0.054, 50% 0.064, 75% 0.095, 100% 0.116 m/s, so the cap sits near 60-65%
-                       # throttle and leaves headroom to steer by speeding one side up.
+V_CAP = 0.12           # m/s; forward speed above this earns nothing more. Raised from 0.08 (2026-11-16): after the
+                       # hard-floor fit the sim walks ~0.09 m/s at 25% and ~0.145 m/s at 50% (real: 0.107 / 0.121),
+                       # and with 0.08 the forward reward was saturated (0.99), so speed earned nothing.
+V_SIDE_SCALE = 0.08    # m/s; normalizes the sideways-velocity penalty. Kept at the old V_CAP value so raising the
+                       # forward cap doesn't weaken the sideways penalty.
 SIM_DT = 0.002         # s, same as walker.xml
 DECIMATION = 31        # policy runs every 31 physics steps = 62 ms = 16.1 Hz. Measured on the real robot
                        # (scripts/imu_rate_check.py, 2026-11-16): a confirmed motor command over BLE takes a
@@ -188,7 +190,7 @@ def forward_vel(env: ManagerBasedRlEnv) -> torch.Tensor:
 
 
 def sideways_vel_sq(env: ManagerBasedRlEnv) -> torch.Tensor:
-  return torch.square(_vel_xy(env)[:, 1] / V_CAP)
+  return torch.square(_vel_xy(env)[:, 1] / V_SIDE_SCALE)
 
 
 def heading_error_sq(env: ManagerBasedRlEnv) -> torch.Tensor:

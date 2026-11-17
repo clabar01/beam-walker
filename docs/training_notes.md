@@ -86,4 +86,6 @@ Episodes all ran the full 10 s (162 steps); 0% flipped.
 
 `forward_vel` is saturated at ~0.99: the policy already walks ~0.14 m/s, above the 0.08 m/s cap (`V_CAP`),
 so speed earns nothing extra and the reward is driven by the steering terms. That was expected after the
-model fit (the real robot does 0.107 m/s at 25%). Not changed yet; consider raising `V_CAP` to ~0.12 m/s.
+model fit (the real robot does 0.107 m/s at 25%). **Done 2026-11-16: `V_CAP` raised to 0.12 m/s** (no CPU
+recheck; judged from the GPU run). The sideways penalty keeps its old 0.08 m/s scale (`V_SIDE_SCALE`) so it
+doesn't get weaker.
