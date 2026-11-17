@@ -61,6 +61,36 @@ The sim policy walks 1.7× faster than the real one. That is consistent with the
 20% far at 50% and gets worse as speed rises. Its forward reward stays pinned at its maximum (0.99) even with
 the 0.12 m/s cap, because sim speeds overshoot.
 
+### Replaying a real run in the sim (`scripts/replay_in_sim.py`, 2026-11-17)
+
+Run `policy_run_20261116-194157` (filmed: `IMG_3803.MOV`), with its logged motor commands fed into the sim at
+the same times:
+
+| Replay | Sim heading vs real IMU (RMS over 10 s) | Sim forward / sideways |
+|---|---|---|
+| Pure physics (`walker.xml`) | **154°** (real ends at -7°; sim turns around to -184°) | -44 / -48 cm |
+| Heading made to follow the real IMU (yaw torque) | 3.5° | **+99 / +14 cm** (measured policy runs: 89-95 / 10-11 cm) |
+
+- **The leg motion matches.** Sim leg revolutions are within 5% of the encoders (11.7/9.6 vs 12.4/9.7).
+- **The turning doesn't.** In the first second the policy runs left 60% / right 35-40%. The sim robot turns -64°
+  from that; the real one stays within ±14° all run. **The real feet resist turning much less than the
+  sim's.**
+- **No single friction value fixes it.** Fitting foot friction to the heading (both feet ~0.25, body 0.5)
+  brings the heading error down to a median 34° over all 9 policy runs. But then the straight walks go 3-4x
+  too short (15.6/18.1/23.0 cm at 25/50/100% vs real 53/61/48). Fitting heading and distance together, the
+  best heading error is still 49°. The real feet grip forward but slide when turning, and MuJoCo's
+  isotropic friction can't represent that with these parameters.
+- **With the real heading imposed, the rest matches.** Forward distance and drift land within ~10% of the
+  measured policy runs, and the same holds on 3 other runs (77-91 cm forward, 4-5° heading RMS). So the
+  fitted model gets the walking right; what's missing is the turning resistance.
+- **Consequence for training:** the sim policy learned to steer with large left/right speed differences, which
+  steer the sim robot hard and the real one only a little. It still drives the real robot straighter than the
+  baseline. Better sim-to-real would need a model of the low turning resistance (e.g. anisotropic foot
+  friction), which means changing `walker.xml`.
+
+Side-by-side videos (outside the repo, `~/Projects/beam-walker-media/`): `real_vs_sim.mp4` (heading follows
+real IMU) and `real_vs_sim_open_loop.mp4` (pure physics).
+
 ---
 
 # Straight-walk fit (5 s, both motors equal)
