@@ -1,7 +1,71 @@
-# Sim vs real: 5 s straight walk
+# Sim vs real
 
-Both motors get the same speed command for 5 s. The real robot is measured with
-a tape measure. The sim numbers come from `scripts/sim_check.py --speed-frac <f>`.
+Two parts: the **trained policy on the real robot** (first section), and the **5 s
+straight-walk fit** that the sim model is based on (the rest). Distances are tape-measured.
+The sim straight-walk numbers come from `scripts/sim_check.py --speed-frac <f>`.
+
+## Trained policy on the real robot (2026-11-16)
+
+Policy: GPU run `results/train_walker-20261116-191801/` (2048 envs × 300 iterations, A100, 9 min), run with
+`scripts/run_policy.py walker_policy.onnx --home` on the hard floor. Baseline: the 50% hard-floor runs below
+(`real_walk_test.py 50 --home`).
+
+**The two were not run for the same time.** The policy runs lasted **10 s** (`run_policy.py`'s default;
+confirmed by the logs). The baseline runs lasted **5 s**. So compare speed (cm/s) and drift as a share of the
+distance walked, not the raw numbers.
+
+| | Policy (10 s, 3 runs) | Baseline 50% (5 s, 3 runs) |
+|---|---|---|
+| Forward (cm) | 95, 90, 89 (mean **91.3**) | 67, 48, 67 (mean 60.7) |
+| Drift (cm) | 11, 10, 10 (mean **10.3**); direction recorded as "L/R" | 16, 36, 1 (mean 17.7), all left |
+| Speed | **9.1 cm/s** | 12.1 cm/s |
+| Drift ÷ forward distance, per run | 11.6%, 11.1%, 11.2% (mean **11.3%**) | 24%, 75%, 1.5% (mean 29%) |
+| Motor commands | 35–40% on average (from the logs) | 50% both |
+
+- **Straighter, per distance:** the policy drifts about 11% of the distance walked, against 29% on average
+  for the baseline. Per unit distance that is about 2.6× less. It walked about 1.5× farther, and drift tends
+  to grow at least in proportion to distance, so this comparison doesn't favor the policy.
+- **Much more repeatable:** policy runs are 89–95 cm forward and 10–11 cm drift. The baseline varies from 1
+  to 36 cm of drift between identical runs.
+- **Slower:** 9.1 vs 12.1 cm/s. The policy averages 35–40% commands and spends effort steering.
+- **Drift direction wasn't recorded.** The IMU's final headings (below) are mostly negative (turned right),
+  so the drift may have been to the right, the opposite of the baseline: the policy may now overcorrect the
+  robot's left pull. Record the direction next time.
+
+### Policy run logs (`data/policy_run_20261116-*.csv`)
+
+There are **5** logged policy runs but 3 measured ones. The logs can't say which tape measurement belongs to
+which run.
+
+| Log | Steps | Real loop rate | Final IMU heading | Mean command L / R |
+|---|---|---|---|---|
+| 193028 | 142 | 14.2 Hz | −11.5° | 35% / 39% |
+| 193101 | 141 | 14.1 Hz | **−117.8°** (turned around) | 34% / 26% |
+| 193145 | 154 | 15.3 Hz | −7.1° | 35% / 40% |
+| 193314 | 153 | 15.2 Hz | −16.1° | 38% / 37% |
+| 193422 | 152 | 15.2 Hz | +28.1° | 35% / 38% |
+
+- One run (193101) ended **turned around (−118°)**. It was presumably not one of the 3 measured runs. If it
+  was a normal start, it is a real failure mode and worth a video.
+- Real control rate was **14.1–15.3 Hz** (median round trip 54–59 ms), a little below the 16.1 Hz trained.
+
+### Policy: sim vs real
+
+| | Sim (left-drifting test robot, 10 s) | Real (mean of 3, 10 s) |
+|---|---|---|
+| Forward | 154.1 cm (15.4 cm/s) | 91.3 cm (9.1 cm/s) |
+| Sideways | +4.7 cm | 10.3 cm |
+| Final heading | +0.9° | −7° to −16° (IMU, 3 of 4 normal runs); +28° in one |
+
+The sim policy walks 1.7× faster than the real one. That is consistent with the fit: the sim already runs
+20% far at 50% and gets worse as speed rises. Its forward reward stays pinned at its maximum (0.99) even with
+the 0.12 m/s cap, because sim speeds overshoot.
+
+---
+
+# Straight-walk fit (5 s, both motors equal)
+
+Both motors get the same speed command for 5 s.
 
 **Status (2026-11-16): hard-floor data in; partly fitted.** Chassis/hub/beam
 friction 0.3 and torque limit 0.032 N·m bring 25% and 50% within 20% of the real

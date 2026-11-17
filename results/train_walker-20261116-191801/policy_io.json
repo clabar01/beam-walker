@@ -1,0 +1,75 @@
+{
+  "task": "BeamWalker-DriveStraight",
+  "policy_rate_hz": 16.129032258064516,
+  "obs_dim": 10,
+  "obs_layout": [
+    {
+      "name": "leg_angle",
+      "index": [
+        0,
+        4
+      ]
+    },
+    {
+      "name": "leg_vel",
+      "index": [
+        4,
+        6
+      ]
+    },
+    {
+      "name": "last_action",
+      "index": [
+        6,
+        8
+      ]
+    },
+    {
+      "name": "gyro_z",
+      "index": [
+        8,
+        9
+      ]
+    },
+    {
+      "name": "heading_error",
+      "index": [
+        9,
+        10
+      ]
+    }
+  ],
+  "obs_meaning": {
+    "leg_angle": "[sin L, sin R, cos L, cos R] of the leg angle in rad; 0 = leg straight forward, + = rolled forward",
+    "leg_vel": "[L, R] leg speed in rad/s divided by max_speed_rad_s (+ = rolling forward)",
+    "last_action": "the previous policy output [L, R] (after clipping to [-1, 1]); zeros at the start",
+    "gyro_z": "yaw rate in rad/s, chassis frame, + = turning left (counterclockwise seen from above)",
+    "heading_error": "yaw in rad since the start (dm.imu_reset_yaw_axis() at the start), + = turned left"
+  },
+  "action": "[L, R] in [-1, 1]; motor speed command = action * max_command_frac * max_speed_rad_s (= action * 60 percent). Never command more than 60%: the sim was only checked against the real robot up to 50% and goes 2x too far at 100%",
+  "max_speed_rad_s": 17.42,
+  "max_command_frac": 0.6,
+  "normalization": "inside the exported model (feed raw observations as above)",
+  "action_delay_in_training": "0 to 1 control steps, uniform, redrawn every step",
+  "real_robot": {
+    "control_loop": "one BLOCKING batch of motor_run (left + right) per step, never a new command before the last is confirmed; measured median round trip 60 ms (95th pct 90, max 118) -> 16 Hz",
+    "measured_rate_hz": 16.0,
+    "imu_update_rate_hz": 32,
+    "heading_error": {
+      "source": "dm.imu_device.yaw",
+      "raw_unit": "0.1 deg",
+      "convert": "rad = wrap_to_pi(radians(raw / 10)); call dm.imu_reset_yaw_axis(0) before starting",
+      "sign": "+ = turned left, same as the sim"
+    },
+    "gyro_z": {
+      "source": "dm.imu_device.gyroscopeZ (z is the yaw axis; x and y barely moved during a 90 deg turn)",
+      "raw_unit": "deg/s (measured 1.08-1.14 raw units per deg/s; treat as deg/s, about 10% uncertain)",
+      "convert": "rad/s = radians(raw)",
+      "sign": "+ = turning left, same as the sim"
+    },
+    "leg_angle": "radians(forward_sign(dir) * dm.motor[i].position) after lego_common.zero_relative_at_home(); 0 = straight forward, + = rolled forward (left counts down when walking forward; verified in the 2026-11-16 walk logs)",
+    "leg_vel": "forward_sign(dir) * dm.motor[i].speed / 100 * max_speed_rad_s; speed is percent of max, same sign as position (walk logs: -24/+24 at 25%, -49/+49 at 50%, -99/+99 at 100% for L/R)",
+    "runner": "scripts/run_policy.py implements all of the above",
+    "action_to_motor": "a = clip(a, -1, 1); percent = round(60 * abs(a)) (at most 60%); direction = LEFT_FORWARD / RIGHT_FORWARD if a >= 0 else the opposite (lego_common)"
+  }
+}
