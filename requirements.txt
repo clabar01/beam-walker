@@ -1,6 +1,7 @@
-mujoco>=3.2
+mujoco==3.11.0   # match the Tufts HPC env (~/mujoco-env)
 numpy
 mediapy
 imageio
 imageio-ffmpeg
 legoeducation==1.2.0   # real-robot scripts (BLE)
+onnxruntime==1.32.0   # run_policy.py: runs the exported walker_policy.onnx

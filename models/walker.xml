@@ -21,15 +21,18 @@
                 command by 1 + value). The hub regulates speed, so the real
                 difference shows up as effort: right needs +2.4% (50%) / +4.8%
                 (100%) more power. Not modeled yet.
-    stall/limit torque  +/-0.3 N*m   -> forcerange="-0.3 0.3"    (PH_TORQUE)
+    torque limit  FITTED +/-0.032 N*m -> forcerange="-0.032 0.032" (2026-11-16)
+                Chosen so the sim's 5 s average leg speed at 100% matches the hard-floor
+                runs (158.4 RPM, 95% of command; real_walk_test.py). Distance barely depends
+                on it: the 97 g robot needs very little torque. Not a measured stall torque.
     velocity gain       kv = 0.05 N*m*s/rad                      (PH_KV)
     rotor armature      0.0001 kg*m^2 (reflected gearbox inertia) (PH_ARMATURE)
     joint damping       0.001 N*m*s/rad                          (PH_DAMPING)
   CONTACT
     foot friction  (sliding, torsional, rolling) = see class "foot"  (PH_FOOT_FRICTION)
-                   0.8 placeholder. NOT tuned: the first real walks were on a soft comforter
-                   (invalid). Re-tune after hard-floor runs; see docs/sim_vs_real.md
-    other geoms    0.8 0.005 0.0001 (default class)  (PH_FRICTION)
+                   0.8, kept. See docs/sim_vs_real.md (hard-floor runs 2026-11-16)
+    other geoms    0.3 0.005 0.0001 (default class: chassis, hubs, beams). FITTED 2026-11-16:
+                   smooth plastic on a hard floor; brings 25% / 50% within 20% of real
     floor          near zero, so each contact uses the OTHER geom's friction
                    (MuJoCo takes the max of the pair)
   ======================================================================================
@@ -63,14 +66,15 @@
   </asset>
 
   <default>
-    <!-- PH_FRICTION for chassis, hubs and beams. The floor is near zero, so
-         each floor contact uses the other geom's value (MuJoCo takes the max). -->
-    <geom friction="0.8 0.005 0.0001" condim="3"/>
+    <!-- Chassis, hubs and beams: 0.3, fitted to hard-floor runs (smooth plastic).
+         The floor is near zero, so each floor contact uses the other geom's value
+         (MuJoCo takes the max of the pair). -->
+    <geom friction="0.3 0.005 0.0001" condim="3"/>
     <!-- PH_ARMATURE, PH_DAMPING -->
     <joint armature="0.0001" damping="0.001"/>
-    <!-- PH_FOOT_FRICTION: the only friction value being tuned against the real robot. -->
+    <!-- Foot friction: 0.8, kept for the hard-floor fit (2026-11-16). -->
     <default class="foot">
-      <geom friction="0.8 0.005 0.0001"/>  <!-- reverted to 0.8: the 0.2 fit used invalid comforter data -->
+      <geom friction="0.8 0.005 0.0001"/>
     </default>
   </default>
 
@@ -141,11 +145,11 @@
   </contact>
 
   <actuator>
-    <!-- PH_SPEED (ctrlrange), PH_KV (kv), PH_TORQUE (forcerange) -->
+    <!-- ctrlrange = measured max speed; kv placeholder (PH_KV); forcerange fitted 2026-11-16 -->
     <velocity name="motor_left" joint="hinge_left" kv="0.05"
-              ctrlrange="-17.42 17.42" forcerange="-0.3 0.3"/>
+              ctrlrange="-17.42 17.42" forcerange="-0.032 0.032"/>
     <velocity name="motor_right" joint="hinge_right" kv="0.05"
-              ctrlrange="-17.42 17.42" forcerange="-0.3 0.3"/>
+              ctrlrange="-17.42 17.42" forcerange="-0.032 0.032"/>
   </actuator>
 
   <sensor>
